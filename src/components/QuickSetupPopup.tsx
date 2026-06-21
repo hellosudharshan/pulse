@@ -21,6 +21,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { ScheduledTask } from '../types';
 import { getAllAudioFiles, deleteAudioFile } from '../lib/indexedDB';
+import { parseWithRegex } from '../lib/regexParser';
 import SearchableDropdown from './SearchableDropdown';
 
 interface QuickSetupPopupProps {
@@ -171,7 +172,11 @@ export default function QuickSetupPopup({ onAddTask }: QuickSetupPopupProps) {
     setParseError('');
     setParseSuccessMsg('');
 
+    let parsed: any = null;
+    let fallbackUsed = false;
+
     try {
+      const userApiKey = localStorage.getItem('pulse_user_gemini_api_key') || '';
       const res = await fetch('/api/parse-reminder', {
         method: 'POST',
         headers: {
@@ -179,15 +184,37 @@ export default function QuickSetupPopup({ onAddTask }: QuickSetupPopupProps) {
         },
         body: JSON.stringify({
           prompt: finalPrompt,
-          referenceTime: new Date().toISOString()
+          referenceTime: new Date().toISOString(),
+          userApiKey: userApiKey
         }),
       });
 
       if (!res.ok) {
-        throw new Error('AI agent failed to parse prompt. Please check your Gemini API key in Settings.');
+        throw new Error('API server failed');
       }
 
-      const parsed = await res.json();
+      parsed = await res.json();
+      if (parsed.error === 'GEMINI_NOT_CONFIGURED') {
+        throw new Error('Gemini key not configured');
+      }
+    } catch (err) {
+      console.warn('AI parsing offline or unconfigured in popup. Triggering local smart parser:', err);
+      parsed = parseWithRegex(finalPrompt);
+      fallbackUsed = true;
+    }
+
+    if (!parsed) {
+      setParseError('Failed to process text command.');
+      setIsParsing(false);
+      return;
+    }
+
+    try {
+      if (fallbackUsed) {
+        setParseSuccessMsg('✓ Command parsed instantly with local offline system');
+      } else {
+        setParseSuccessMsg('✓ Advanced parsing powered by Gemini AI');
+      }
 
       // Set Parsed attributes
       const pLabel = parsed.label || (parsed.type === 'countdown' ? 'Countdown Break' : 'Time-of-Day Alarm');
@@ -281,7 +308,7 @@ export default function QuickSetupPopup({ onAddTask }: QuickSetupPopupProps) {
         }
       }
 
-      setParseSuccessMsg(`Parsed successfully: Adjusted parameters to "${parsed.label || 'Reminder'}"`);
+      setParseSuccessMsg(`${fallbackUsed ? '✓ Offline text parser:' : '✓ Gemini AI parsed:'} configured "${parsed.label || 'Reminder'}"`);
     } catch (err: any) {
       console.error(err);
       setParseError(err.message || 'Error parsing voice command.');

@@ -12,30 +12,29 @@ async function startServer() {
 
   app.use(express.json());
 
-  // Gemini instance helper
-  const apiKey = process.env.GEMINI_API_KEY;
-  const ai = apiKey ? new GoogleGenAI({
-    apiKey,
-    httpOptions: {
-      headers: {
-        'User-Agent': 'aistudio-build',
-      }
-    }
-  }) : null;
-
   // Endpoint for parsing natural language reminders
   app.post("/api/parse-reminder", async (req: express.Request, res: express.Response) => {
     try {
-      const { prompt, referenceTime } = req.body;
+      const { prompt, referenceTime, userApiKey } = req.body;
       if (!prompt) {
         return res.status(400).json({ error: "Prompt is required." });
       }
 
-      if (!ai) {
-        return res.status(500).json({ 
-          error: "GEMINI_API_KEY is not configured in the host environment. Please set it up in Settings." 
+      const activeKey = userApiKey || process.env.GEMINI_API_KEY;
+      if (!activeKey) {
+        return res.status(403).json({ 
+          error: "GEMINI_NOT_CONFIGURED" 
         });
       }
+
+      const aiInstance = new GoogleGenAI({
+        apiKey: activeKey,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          }
+        }
+      });
 
       const systemInstruction = `You are an expert natural language scheduler designed for an interval timer and alarm app.
 Analyze the user's spoken or typed text prompt and convert it to a structured schedule configuration.
@@ -102,7 +101,7 @@ Follow these rules:
         for (let attempt = 1; attempt <= 3; attempt++) {
           try {
             console.log(`[Gemini Engine] Attempting payload parsing with ${modelName} (attempt ${attempt}/3)...`);
-            return await ai.models.generateContent(options);
+            return await aiInstance.models.generateContent(options);
           } catch (err: any) {
             lastErr = err;
             const errMsg = err.message || "";
@@ -122,7 +121,7 @@ Follow these rules:
         if (modelName === "gemini-3.5-flash") {
           console.warn(`[Gemini Engine] Model gemini-3.5-flash failed (${lastErr?.message}). Falling back to gemini-flash-latest...`);
           try {
-            return await ai.models.generateContent({
+            return await aiInstance.models.generateContent({
               ...options,
               model: "gemini-flash-latest"
             });

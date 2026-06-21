@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { ScheduledTask, AudioSynthType, AudioProfile } from '../types';
 import { saveAudioFile, getAllAudioFiles, deleteAudioFile } from '../lib/indexedDB';
+import { parseWithRegex } from '../lib/regexParser';
 import SearchableDropdown, { DropdownGroup } from './SearchableDropdown';
 
 interface FormConfigurationProps {
@@ -147,7 +148,11 @@ export default function FormConfiguration({ onAddTask }: FormConfigurationProps)
     setParseError('');
     setParseSuccessMsg('');
 
+    let parsed: any = null;
+    let fallbackUsed = false;
+
     try {
+      const userApiKey = localStorage.getItem('pulse_user_gemini_api_key') || '';
       const res = await fetch('/api/parse-reminder', {
         method: 'POST',
         headers: {
@@ -155,15 +160,37 @@ export default function FormConfiguration({ onAddTask }: FormConfigurationProps)
         },
         body: JSON.stringify({
           prompt: finalPrompt,
-          referenceTime: new Date().toISOString()
+          referenceTime: new Date().toISOString(),
+          userApiKey: userApiKey
         }),
       });
 
       if (!res.ok) {
-        throw new Error('Our AI agent failed to analyze prompt. Please check your network and Gemini API key.');
+        throw new Error('API server failed');
       }
 
-      const parsed = await res.json();
+      parsed = await res.json();
+      if (parsed.error === 'GEMINI_NOT_CONFIGURED') {
+        throw new Error('Gemini key not configured');
+      }
+    } catch (err) {
+      console.warn('AI parsing offline or unconfigured. Triggering local smart parser:', err);
+      parsed = parseWithRegex(finalPrompt);
+      fallbackUsed = true;
+    }
+
+    if (!parsed) {
+      setParseError('Failed to process text command.');
+      setIsParsing(false);
+      return;
+    }
+
+    try {
+      if (fallbackUsed) {
+        setParseSuccessMsg('✓ Command parsed instantly with local offline system');
+      } else {
+        setParseSuccessMsg('✓ Advanced parsing powered by Gemini AI');
+      }
 
       // Apply the fields dynamically
       const selectedLabel = parsed.label || (parsed.type === 'countdown' ? 'Countdown focus' : 'Time-based Alarm');
@@ -253,10 +280,10 @@ export default function FormConfiguration({ onAddTask }: FormConfigurationProps)
         }
       }
 
-      setParseSuccessMsg(`AI parsed successfully: Adjusted inputs to "${parsed.label}" (${parsed.type === 'countdown' ? `${parsed.durationSeconds}s` : `${parsed.alarmHour}:${parsed.alarmMinute} ${parsed.alarmAmpm}`}). Review and press "Initialize Sequence" below to launch!`);
+      setParseSuccessMsg(`${fallbackUsed ? '✓ Offline text parser:' : '✓ Gemini AI parsed:'} configured "${parsed.label}" (${parsed.type === 'countdown' ? `${parsed.durationSeconds}s` : `${parsed.alarmHour}:${parsed.alarmMinute} ${parsed.alarmAmpm}`}). Review and press "Initialize Sequence" to launch!`);
     } catch (err: any) {
       console.error(err);
-      setParseError(err.message || 'Error occurred while contacting semantic parsing agent.');
+      setParseError(err.message || 'Error occurred while configuring parsed inputs.');
     } finally {
       setIsParsing(false);
     }
