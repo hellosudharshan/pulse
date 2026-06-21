@@ -1,0 +1,6 @@
+{
+  "name": "Pulse",
+  "description": "An intelligent alarm, interval micro-break manager, and habit tracking dashboard with Web Audio synthesis and offline reliability.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
